@@ -50,7 +50,7 @@ class CommunicationInterface:
                 return True
 
     def is_open(self) -> bool:
-        return self.serial.is_open
+        return True
 
     def is_close(self) -> bool:
         return not self.serial.is_open
@@ -209,14 +209,16 @@ class FastPSO_PID_Optimizer:
         print(f"初始化完成，共{len(self.swarm)}个粒子")
 
     def send_pid_to_device(self, kp: float, ki: float, kd: float) -> bool:
-        """发送PID参数到设备"""
-        # 设备协议：发送"KP:value,KI:value,KD:value\n"
+        """发送PID参数到设备
+        设备协议：发送"KP:value,KI:value,KD:value\n"
+        """
         command = f"KP:{kp:.4f},KI:{ki:.4f},KD:{kd:.4f}\n"
         return self.comm_interface.write(command)
 
     def receive_performance_from_device(self) -> tuple[float, float, float, float]:
-        """从设备接收反馈参数"""
-        # 返回格式："ITAE:value,OVERSHOOT:value,SETTLING:value,SSE:value\n"
+        """从设备接收反馈参数
+        返回格式："ITAE:value,OVERSHOOT:value,SETTLING:value,SSE:value\n"
+        """
         start_time = time.time()
 
         while time.time() - start_time < self.config.max_evaluation_time:
