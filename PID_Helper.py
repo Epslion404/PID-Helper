@@ -9,6 +9,7 @@ import time
 import numpy as np
 import json
 from typing import Optional
+import logging
 
 
 class CommunicationInterface:
@@ -18,34 +19,34 @@ class CommunicationInterface:
         if port is not "" and baud_rate > 0:
             self.serial: serial.Serial = serial.Serial(port=port, baudrate=baud_rate)
             if self.serial.is_open:
-                print("[CI]串口打开失败")
+                logging.critical("[CI]串口打开失败")
                 self.serial: serial.Serial = serial.Serial()
             else:
-                print("[CI]串口打开成功")
+                logging.info("[CI]串口打开成功")
         else:
             self.serial: serial.Serial = serial.Serial()
-            print("[CI]无串口配置数据")
+            logging.warning("[CI]无串口配置数据")
 
     def open(self, port: str, baud_rate: int) -> bool:
         self.serial = serial.Serial(port=port, baudrate=baud_rate)
         if self.serial.is_open:
-            print("[CI]串口打开失败")
+            logging.critical("[CI]串口打开失败")
             self.serial: serial.Serial = serial.Serial()
         else:
-            print("[CI]串口打开成功")
+            logging.info("[CI]串口打开成功")
         return self.serial.is_open
 
     def close(self) -> bool:
         if not self.serial.is_open:
-            print("[CI]串口关闭失败，未打开串口")
+            logging.warning("[CI]串口关闭失败，未打开串口")
             return False
         else:
             self.serial.close()
             if self.serial.open:
-                print("[CI]串口关闭失败")
+                logging.error("[CI]串口关闭失败")
                 return False
             else:
-                print("[CI]串口关闭成功")
+                logging.info("[CI]串口关闭成功")
                 return True
 
     def is_open(self) -> bool:
@@ -56,38 +57,38 @@ class CommunicationInterface:
 
     def write(self, data: str, encode: str = "ansi") -> bool:
         if not self.serial.writable:
-            print("[CI]串口不可写")
+            logging.error("[CI]串口不可写")
             return False
         else:
             try:
                 self.serial.write(data.encode(encode))
             except Exception as e:
-                print(f"[CI]发送失败：{e}")
+                logging.error(f"[CI]发送失败：{e}")
                 return False
             return True
 
     def read(self, size: int = 1, decode: str = "ansi") -> Optional[str]:
         if not self.serial.readable:
-            print("[CI]串口不可读")
+            logging.error("[CI]串口不可读")
             return None
         else:
             try:
                 buf = self.serial.read(size).decode(decode, errors="ignore").strip()
                 return buf if buf else None
             except Exception as e:
-                print(f"[CI]接收失败：{e}")
+                logging.error(f"[CI]接收失败：{e}")
                 return None
 
     def read_line(self, decode: str = "ansi") -> Optional[str]:
         if not self.serial.readable:
-            print("[CI]串口不可读")
+            logging.error("[CI]串口不可读")
             return None
         else:
             try:
                 line = self.serial.readline().decode(decode, errors="ignore").strip()
                 return line if line else None
             except Exception as e:
-                print(f"[CI]接收失败：{e}")
+                logging.error(f"[CI]接收失败：{e}")
                 return None
 
 
@@ -253,7 +254,7 @@ class FastPSO_PID_Optimizer:
 
         # 发送参数到设备
         if not self.send_pid_to_device(kp, ki, kd):
-            print("发送参数失败")
+            logging.error("发送参数失败")
             return False
 
         # 等待设备响应
@@ -356,14 +357,14 @@ class FastPSO_PID_Optimizer:
     def optimize(self, verbose: bool = True) -> tuple[np.ndarray, float]:
         """运行优化过程"""
         if not self.comm_interface.is_open():
-            print("错误: 通信接口未打开")
+            logging.error("错误: 通信接口未打开")
             return self.global_best_position, self.global_best_fitness
 
-        print("开始PSO优化过程")
-        print(
+        logging.info("开始PSO优化过程")
+        logging.info(
             f"种群大小: {self.config.swarm_size}, 最大迭代: {self.config.max_iterations}"
         )
-        print(
+        logging.info(
             f"参数范围: Kp[{self.config.min_param[0]}, {self.config.max_param[0]}], "
             f"Ki[{self.config.min_param[1]}, {self.config.max_param[1]}], "
             f"Kd[{self.config.min_param[2]}, {self.config.max_param[2]}]"
@@ -373,7 +374,7 @@ class FastPSO_PID_Optimizer:
         self.initialize_swarm()
 
         # 初始评估
-        print("\n初始评估...")
+        logging.info("\n初始评估...")
         for particle in self.swarm:
             self.evaluate_particle(particle)
 
@@ -383,7 +384,7 @@ class FastPSO_PID_Optimizer:
         # 迭代优化
         for iteration in range(1, self.config.max_iterations + 1):
             if verbose:
-                print(f"\n迭代 {iteration}/{self.config.max_iterations}")
+                logging.info(f"\n迭代 {iteration}/{self.config.max_iterations}")
 
             # 更新惯性权重
             self.update_inertia_weight(iteration)
@@ -393,7 +394,7 @@ class FastPSO_PID_Optimizer:
                 self.update_particle(particle, iteration)
 
             # 评估更新后的粒子
-            print(f"评估第{iteration}代...")
+            logging.info(f"评估第{iteration}代...")
             for particle in self.swarm:
                 self.evaluate_particle(particle)
 
@@ -405,10 +406,10 @@ class FastPSO_PID_Optimizer:
             if verbose and (
                 iteration % 5 == 0 or iteration == self.config.max_iterations
             ):
-                print(
+                logging.info(
                     f"进度: 迭代{iteration}, 最优适应度={self.global_best_fitness:.6f}"
                 )
-                print(
+                logging.info(
                     f"最优参数: Kp={self.global_best_position[0]:.4f}, "
                     f"Ki={self.global_best_position[1]:.4f}, "
                     f"Kd={self.global_best_position[2]:.4f}"
@@ -416,7 +417,7 @@ class FastPSO_PID_Optimizer:
 
             # 检查收敛
             if self.check_convergence():
-                print(f"算法在第{iteration}代收敛")
+                logging.info(f"算法在第{iteration}代收敛")
                 break
 
         # 输出结果
@@ -426,15 +427,15 @@ class FastPSO_PID_Optimizer:
 
     def print_results(self) -> None:
         """打印优化结果"""
-        print("\n" + "=" * 50)
-        print("PSO优化完成!")
-        print("=" * 50)
-        print(f"总评估次数: {self.evaluation_count}")
-        print(f"最优参数:")
-        print(f"  Kp = {self.global_best_position[0]:.6f}")
-        print(f"  Ki = {self.global_best_position[1]:.6f}")
-        print(f"  Kd = {self.global_best_position[2]:.6f}")
-        print(f"最优适应度: {self.global_best_fitness:.6f}")
+        logging.info("\n" + "=" * 50)
+        logging.info("PSO优化完成!")
+        logging.info("=" * 50)
+        logging.info(f"总评估次数: {self.evaluation_count}")
+        logging.info(f"最优参数:")
+        logging.info(f"  Kp = {self.global_best_position[0]:.6f}")
+        logging.info(f"  Ki = {self.global_best_position[1]:.6f}")
+        logging.info(f"  Kd = {self.global_best_position[2]:.6f}")
+        logging.info(f"最优适应度: {self.global_best_fitness:.6f}")
 
     def save_results(self, filename: str = "pso_pid_results.json") -> None:
         """保存优化结果到文件"""
@@ -467,31 +468,31 @@ class FastPSO_PID_Optimizer:
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
-            print(f"结果已保存到: {filename}")
+            logging.info(f"结果已保存到: {filename}")
         except Exception as e:
-            print(f"保存结果失败: {e}")
+            logging.error(f"保存结果失败: {e}")
 
 
 def main() -> None:
     # 获取可用串口列表
     ports = list(serial.tools.list_ports.comports())
     if ports:
-        print("可用的串口列表：")
+        logging.info("可用的串口列表：")
         for i in ports:
-            print(i.device)
+            logging.info(i.device)
     else:
-        print("未找到可用的串口。")
+        logging.error("未找到可用的串口。")
 
     port = input("请输入串口号").strip()
     baud_rate = int(input("请输入波特率").strip())
 
     comm_interface = CommunicationInterface(port, baud_rate)
     if not comm_interface.is_open():
-        print("无法打开串口，退出……")
+        logging.critical("无法打开串口，退出……")
         return None
 
     # 配置PSO参数
-    print("\n\n配置PSO参数:")
+    logging.info("\n\n配置PSO参数:")
     use_default = input("使用默认配置? (y/n): ").strip().lower()
 
     if use_default == "y":
@@ -507,7 +508,7 @@ def main() -> None:
         )
     else:
         # 自定义配置
-        print("\n输入参数范围:")
+        logging.info("\n输入参数范围:")
         kp_min = float(input("Kp最小值: "))
         kp_max = float(input("Kp最大值: "))
         ki_min = float(input("Ki最小值: "))
@@ -515,7 +516,7 @@ def main() -> None:
         kd_min = float(input("Kd最小值: "))
         kd_max = float(input("Kd最大值: "))
 
-        print("\n输入算法参数:")
+        logging.info("\n输入算法参数:")
         pop_size = int(input("种群大小: "))
         max_iter = int(input("最大迭代次数: "))
 
@@ -537,11 +538,11 @@ def main() -> None:
     try:
         best_params, best_fitness = optimizer.optimize(verbose=True)
 
-        print("\n优化完成!")
-        print(
+        logging.info("\n优化完成!")
+        logging.info(
             f"最优参数: Kp={best_params[0]:.4f}, Ki={best_params[1]:.4f}, Kd={best_params[2]:.4f}"
         )
-        print(f"最优适应度: {best_fitness:.6f}")
+        logging.info(f"最优适应度: {best_fitness:.6f}")
 
         # 保存结果
         save = input("\n\n是否保存优化结果? (y/n): ").strip().lower()
@@ -552,9 +553,9 @@ def main() -> None:
             optimizer.save_results(filename)
 
     except KeyboardInterrupt:
-        print("\n用户终止优化过程")
+        logging.info("\n用户终止优化过程")
     except Exception as e:
-        print(f"\n优化过程中发生错误: {e}")
+        logging.critical(f"\n优化过程中发生错误: {e}")
     finally:
         # 清理
         if comm_interface.is_open():
