@@ -4,19 +4,19 @@
 
 import serial
 import serial.tools.list_ports
-import random
 import time
 import numpy as np
 import json
 from typing import Optional
 import logging
+from parse import parse
 
 
 class CommunicationInterface:
     def __init__(self, port: str = "", baud_rate: int = -1) -> None:
         self._port = port
         self._baud_rate = baud_rate
-        if port is not "" and baud_rate > 0:
+        if port != "" and baud_rate > 0:
             self.serial: serial.Serial = serial.Serial(port=port, baudrate=baud_rate)
             if self.serial.is_open:
                 logging.critical("[CI]串口打开失败")
@@ -133,6 +133,8 @@ class FastPSO_PID_Conf:
         c1: float = 1.49618,
         c2: float = 1.49618,
         constriction_factor: float = 0.0,
+        evaluation_delay: float = 0.5,
+        max_evaluation_time: float = 5.0,
     ) -> None:
         self.swarm_size: int = pop_size
         self.max_iterations: int = max_iter
@@ -157,17 +159,25 @@ class FastPSO_PID_Conf:
         )  # itae, overshoot, settling_time, sse
 
         # 评估参数
-        self.evaluation_delay: float = 0.5  # 每次评估后的延迟
-        self.max_evaluation_time: float = 5.0  # 最大评估时间
+        self.evaluation_delay: float = evaluation_delay  # 每次评估后的延迟
+        self.max_evaluation_time: float = max_evaluation_time  # 最大评估时间
 
 
 # 快速收敛的PSO优化器
 class FastPSO_PID_Optimizer:
     def __init__(
-        self, config: FastPSO_PID_Conf, comm_interface: CommunicationInterface
+        self,
+        config: FastPSO_PID_Conf,
+        comm_interface: CommunicationInterface,
+        f: str = "ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}",
+        start: str = "start",
+        stop: str = "stop",
     ) -> None:
         self.config = config
         self.comm_interface = comm_interface
+        self.format: str = f
+        self.start_cmd: str = start
+        self.stop_cmd: str = stop
 
         # 粒子群
         self.swarm: list[Particle] = []
@@ -225,19 +235,13 @@ class FastPSO_PID_Optimizer:
             line = self.comm_interface.read_line()
             if line:
                 try:
-                    # 解析性能数据
-                    parts = line.split(",")
-                    metrics = {}
-                    for part in parts:
-                        if ":" in part:
-                            key, value = part.split(":")
-                            metrics[key.strip()] = float(value.strip())
+                    result = parse(self.format, line)
 
                     # 提取需要的指标
-                    itae = metrics.get("ITAE", 0.0)
-                    overshoot = metrics.get("OVERSHOOT", 0.0)
-                    settling = metrics.get("SETTLING", 0.0)
-                    sse = metrics.get("SSE", 0.0)
+                    itae = result.named["ITAE"]
+                    overshoot = result.named["OVERSHOOT"]
+                    settling = result.named["SETTLING"]
+                    sse = result.named["SSE"]
 
                     return itae, overshoot, settling, sse
                 except:
@@ -246,7 +250,7 @@ class FastPSO_PID_Optimizer:
             time.sleep(0.01)
 
         # 超时返回默认值
-        return 1000.0, 100.0, 10.0, 1.0
+        raise RuntimeError("等待反馈参数超时")
 
     def evaluate_particle(self, particle: Particle) -> bool:
         """评估单个粒子"""
@@ -259,11 +263,19 @@ class FastPSO_PID_Optimizer:
             logging.error("发送参数失败")
             return False
 
+        if not self.comm_interface.write(self.start_cmd):
+            logging.error("发送启动指令失败")
+            return False
+
         # 等待设备响应
         time.sleep(self.config.evaluation_delay)
 
         # 接收性能指标
         itae, overshoot, settling_time, sse = self.receive_performance_from_device()
+
+        if not self.comm_interface.write(self.stop_cmd):
+            logging.error("发送停止指令失败")
+            return False
 
         # 计算适应度（加权和，越小越好）
         fitness = (
@@ -378,7 +390,14 @@ class FastPSO_PID_Optimizer:
         # 初始评估
         logging.info("\n初始评估...")
         for particle in self.swarm:
-            self.evaluate_particle(particle)
+            while not self.evaluate_particle(particle):
+                logging.error("评估失败")
+                retry = input("重试？(y/n)")
+                retry = retry.lower()
+                if retry == "y":
+                    continue
+                else:
+                    break
 
         self.update_global_best()
         self.best_fitness_history.append(self.global_best_fitness)
@@ -495,6 +514,13 @@ def main() -> None:
 
     # 配置PSO参数
     logging.info("\n\n配置PSO参数:")
+    f = input(
+        r"输入数据解析格式（默认：ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}）："
+    )
+    if f == "":
+        f = "ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}"
+    start_cmd = input("输入启动PID指令")
+    stop_cmd = input("输入停止PID指令")
     use_default = input("使用默认配置? (y/n): ").strip().lower()
 
     if use_default == "y":
@@ -521,6 +547,8 @@ def main() -> None:
         logging.info("\n输入算法参数:")
         pop_size = int(input("种群大小: "))
         max_iter = int(input("最大迭代次数: "))
+        eva_delay = float(input("每次评估后的延迟"))
+        max_eva_delay = float(input("最大评估延迟"))
 
         config = FastPSO_PID_Conf(
             kp_min=kp_min,
@@ -531,10 +559,12 @@ def main() -> None:
             kd_max=kd_max,
             pop_size=pop_size,
             max_iter=max_iter,
+            evaluation_delay=eva_delay,
+            max_evaluation_time=max_eva_delay,
         )
 
     # 创建优化器
-    optimizer = FastPSO_PID_Optimizer(config, comm_interface)
+    optimizer = FastPSO_PID_Optimizer(config, comm_interface, f, start_cmd, stop_cmd)
 
     # 运行优化
     try:

@@ -298,7 +298,7 @@ class Demo_CI(PH.CommunicationInterface):
             if max_value > setpoint:
                 overshoot = ((max_value - setpoint) / setpoint) * 100.0
 
-        # 调节时间 (以进入±2%误差带的时间为调节时间)
+        # 调节时间 (以进入±2%误差带的时间为调节时间为准)
         settling_time: float = 0.0
         if setpoint > 0 and len(post_step_position) > 0:
             settling_threshold = 0.02 * setpoint
@@ -592,9 +592,9 @@ def _plot_response(perf: dict):
     positions = perf["positions"]
     setpoint = 1.0
 
-    plt.plot(time_points, positions, "b-", linewidth=2, label="System Response")
-    plt.axhline(y=setpoint, color="r", linestyle="--", linewidth=1.5, label="Setpoint")
-    plt.axvline(x=1.0, color="g", linestyle=":", linewidth=1.5, label="Step Start")
+    plt.plot(time_points, positions, "b-", linewidth=2, label="PID响应")
+    plt.axhline(y=setpoint, color="r", linestyle="--", linewidth=1.5, label="目标值")
+    plt.axvline(x=1.0, color="g", linestyle=":", linewidth=1.5, label="起始时间")
 
     plt.xlabel("时间 (s)", fontsize=12)
     plt.ylabel("位置", fontsize=12)
