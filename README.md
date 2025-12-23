@@ -43,18 +43,15 @@
 - 下位机执行控制过程，计算性能指标并返回结果
 - 通信格式需与上位机解析器匹配
 
+> 具体过程参考PID_Helper.py->FastPSO_PID_Optimizer->optimize()
+
 ### 3. 自定义通信接口
 如需非串口通信，请按以下示例实现：
 ```python
-from communication_interface import CommunicationInterface
+from PID_Helper import CommunicationInterface
 
 class CustomCommunication(CommunicationInterface):
-    def send(self, data):
-        # 实现发送逻辑
-        pass
-    def receive(self):
-        # 实现接收逻辑
-        pass
+    ...
 ```
 
 ## PID性能指标算法
@@ -75,20 +72,13 @@ $$
 
 ### 3. 调节时间
 系统响应进入并保持在目标值±2%误差带内所需的时间。  
-*注：可根据实际需求调整误差带范围。*
+
+> 可根据实际需求调整误差带范围
 
 ### 4. 稳态误差
 取响应过程最后10%时间段内误差的平均值。  
-*注：也可采用其他稳态误差计算方法。*
 
-## 项目结构
-```
-PIDHelper/
-├── PID_Helper.py      # 主程序
-├── communication_interface.py  # 通信接口基类
-├── demo.py            # 示例程序
-└── README.md
-```
+> 也可采用其他稳态误差计算方法
 
 ## 注意事项
 - 确保通信稳定，避免数据丢失
@@ -96,4 +86,4 @@ PIDHelper/
 - 可调整PSO算法参数以平衡收敛速度与精度
 
 ## 许可证
-开源项目，遵循MIT许可证。
+开源项目，遵循 Apache-2.0。
