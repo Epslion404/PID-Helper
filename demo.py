@@ -2,7 +2,8 @@
 
 import numpy as np
 from typing import List, Tuple, Optional
-import PID_Helper as PH
+import PID_Helper.CommunicationInterface as CI
+import PID_Helper.PID_Helper as PH
 import matplotlib
 import matplotlib.pyplot as plt
 
@@ -118,7 +119,7 @@ class DemoSystem:
         self.velocity = 0.0
 
 
-class Demo_CI(PH.CommunicationInterface):
+class Demo_CI(CI.CommunicationInterface):
     def __init__(self, port: str = "", baud_rate: int = -1) -> None:
         # 不调用父类__init__，因为不需要真实串口
         self.w_data: str = ""
@@ -731,8 +732,8 @@ def main() -> None:
                     ki_max=30.0,
                     kd_min=-10.0,
                     kd_max=10.0,
-                    pop_size=10,
-                    max_iter=15,
+                    pop_size=6,
+                    max_iter=8,
                 )
             else:
                 print("\n请输入参数范围:")

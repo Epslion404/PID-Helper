@@ -12,8 +12,9 @@
 - Python 3.10.x
 - 依赖库：
   ```bash
-  pip install pyserial numpy parse
+  pip install pyserial numpy parse matplotlib scipy
   ```
+- 或者直接使用venv
 
 ## 快速开始
 
@@ -43,7 +44,7 @@
 - 下位机执行控制过程，计算性能指标并返回结果
 - 通信格式需与上位机解析器匹配
 
-> 具体过程参考PID_Helper.py->FastPSO_PID_Optimizer->optimize()
+> 具体过程参考PID_Helper.py->FastPSO_PID_Optimizer->optimize()和evaluate_particle()
 
 ### 3. 自定义通信接口
 如需非串口通信，请按以下示例实现：
