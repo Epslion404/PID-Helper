@@ -16,6 +16,10 @@
 
 import numpy as np
 from typing import List, Tuple, Optional
+from PID_Helper.Log import setup_logger
+import PID_Helper.Log as Log
+
+Log.root_file_name = "demo"
 import PID_Helper.CommunicationInterface as CI
 import PID_Helper.PID_Helper as PH
 import matplotlib
@@ -24,12 +28,9 @@ import matplotlib.pyplot as plt
 matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei"]
 matplotlib.rcParams["axes.unicode_minus"] = False  # 正常显示负号
 
-import logging
 import time
 import warnings
 
-# 设置日志和忽略警告
-logging.basicConfig(level=logging.INFO, format="%(message)s")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
@@ -180,7 +181,7 @@ class Demo_CI(CI.CommunicationInterface):
                 self._run_simulation(kp, ki, kd)
 
         except Exception as e:
-            logging.error(f"解析PID参数失败: {e}")
+            logger.error(f"解析PID参数失败: {e}")
             return False
 
         return True
@@ -261,10 +262,10 @@ class Demo_CI(CI.CommunicationInterface):
         self.evaluation_count += 1
 
         # 记录日志
-        logging.info(
+        logger.info(
             f"评估 #{self.evaluation_count}: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}"
         )
-        logging.info(
+        logger.info(
             f"  性能: ITAE={itae:.2f}, 超调={overshoot:.1f}%, 调节时间={settling_time:.2f}s, 稳态误差={sse:.4f}"
         )
 
@@ -366,11 +367,11 @@ class Demo_FastPSO_PID_Optimizer(PH.FastPSO_PID_Optimizer):
         """重写评估方法，使用模拟通信"""
         kp, ki, kd = particle.position
 
-        logging.info(f"评估: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
+        logger.info(f"评估: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
 
         # 发送到设备
         if not self.comm_interface.write(f"KP:{kp:.4f},KI:{ki:.4f},KD:{kd:.4f}\n"):
-            logging.error("发送参数失败")
+            logger.error("发送参数失败")
             return False
 
         # 等待响应
@@ -419,10 +420,10 @@ class Demo_FastPSO_PID_Optimizer(PH.FastPSO_PID_Optimizer):
 
                 return True
             except Exception as e:
-                logging.error(f"解析性能数据失败: {e}")
+                logger.error(f"解析性能数据失败: {e}")
                 return False
         else:
-            logging.error("未接收到性能数据")
+            logger.error("未接收到性能数据")
             return False
 
     def optimize(self, verbose: bool = True) -> tuple[np.ndarray, float]:
@@ -829,4 +830,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logger = setup_logger(__file__)
     main()

@@ -15,8 +15,10 @@
 # limitations under the License.
 
 import serial
-import logging
 from typing import Optional
+from PID_Helper.Log import setup_logger
+
+logger = setup_logger(__file__)
 
 
 class CommunicationInterface:
@@ -26,34 +28,34 @@ class CommunicationInterface:
         if port != "" and baud_rate > 0:
             self.serial: serial.Serial = serial.Serial(port=port, baudrate=baud_rate)
             if self.serial.is_open:
-                logging.critical("[CI]串口打开失败")
+                logger.critical("串口打开失败")
                 self.serial: serial.Serial = serial.Serial()
             else:
-                logging.info("[CI]串口打开成功")
+                logger.info("串口打开成功")
         else:
             self.serial: serial.Serial = serial.Serial()
-            logging.warning("[CI]无串口配置数据")
+            logger.warning("无串口配置数据")
 
     def open(self, port: str, baud_rate: int) -> bool:
         self.serial = serial.Serial(port=port, baudrate=baud_rate)
         if self.serial.is_open:
-            logging.critical("[CI]串口打开失败")
+            logger.critical("串口打开失败")
             self.serial: serial.Serial = serial.Serial()
         else:
-            logging.info("[CI]串口打开成功")
+            logger.info("串口打开成功")
         return self.serial.is_open
 
     def close(self) -> bool:
         if not self.serial.is_open:
-            logging.warning("[CI]串口关闭失败，未打开串口")
+            logger.warning("串口关闭失败，未打开串口")
             return False
         else:
             self.serial.close()
             if self.serial.open:
-                logging.error("[CI]串口关闭失败")
+                logger.error("串口关闭失败")
                 return False
             else:
-                logging.info("[CI]串口关闭成功")
+                logger.info("串口关闭成功")
                 return True
 
     def is_open(self) -> bool:
@@ -64,36 +66,36 @@ class CommunicationInterface:
 
     def write(self, data: str, encode: str = "ansi") -> bool:
         if not self.serial.writable:
-            logging.error("[CI]串口不可写")
+            logger.error("串口不可写")
             return False
         else:
             try:
                 self.serial.write(data.encode(encode))
             except Exception as e:
-                logging.error(f"[CI]发送失败：{e}")
+                logger.error(f"发送失败：{e}")
                 return False
             return True
 
     def read(self, size: int = 1, decode: str = "ansi") -> Optional[str]:
         if not self.serial.readable:
-            logging.error("[CI]串口不可读")
+            logger.error("串口不可读")
             return None
         else:
             try:
                 buf = self.serial.read(size).decode(decode, errors="ignore").strip()
                 return buf if buf else None
             except Exception as e:
-                logging.error(f"[CI]接收失败：{e}")
+                logger.error(f"接收失败：{e}")
                 return None
 
     def read_line(self, decode: str = "ansi") -> Optional[str]:
         if not self.serial.readable:
-            logging.error("[CI]串口不可读")
+            logger.error("串口不可读")
             return None
         else:
             try:
                 line = self.serial.readline().decode(decode, errors="ignore").strip()
                 return line if line else None
             except Exception as e:
-                logging.error(f"[CI]接收失败：{e}")
+                logger.error(f"接收失败：{e}")
                 return None

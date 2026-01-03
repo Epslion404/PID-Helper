@@ -23,6 +23,9 @@ import json
 import logging
 from parse import parse
 from PID_Helper.CommunicationInterface import CommunicationInterface
+from PID_Helper.Log import setup_logger
+
+logger = setup_logger(__file__)
 
 
 # PSO粒子
@@ -102,13 +105,34 @@ class FastPSO_PID_Optimizer:
         self,
         config: FastPSO_PID_Conf,
         comm_interface: CommunicationInterface,
+        caculate_from_mcu: bool = False,
         f: str = "ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}",
         start: str = "start",
         stop: str = "stop",
+        delta_t: float = 0.0,
     ) -> None:
+        """
+        FastPSO_PID_Optimizer初始化
+
+        :param comm_interface: FastPSO_PID_Optimizer配置类
+        :type config: FastPSO_PID_Conf
+        :param comm_interface: 通信类
+        :type comm_interface: CommunicationInterface
+        :param caculate_from_mcu: 是否从单片机计算性能数据，若为否，则需要从下位机接收PID运行过程参数
+        :type caculate_from_mcu: bool
+        :param f: 单片机数据输出格式，取决于 `caculate_from_mcu` 的值，需要ITAE、OverShoot、Setting、SSE或Target、Output
+        :type f: str
+        :param start: 启动pid命令
+        :type start: str
+        :param stop: 停止pid控制命令
+        :type stop: str
+        :param delta_t: pid调控周期（秒），仅在caculate_from_mcu为否时起作用
+        :type delta_t: float
+        """
         self.config = config
         self.comm_interface = comm_interface
         self.format: str = f
+        self.caculate_from_mcu: bool = caculate_from_mcu
         self.start_cmd: str = start
         self.stop_cmd: str = stop
 
@@ -130,6 +154,12 @@ class FastPSO_PID_Optimizer:
 
         # 随机种子
         np.random.seed(int(time.time()))
+        logger.debug(f"FastPSO_PID_Optimizer 初始化完成，随机种子: {int(time.time())}")
+
+        # PID运行过程
+        self.target_list: list = []
+        self.output_list: list = []
+        self.delta_t: float = delta_t
 
     def initialize_swarm(self) -> None:
         """初始化粒子群"""
@@ -149,18 +179,21 @@ class FastPSO_PID_Optimizer:
             particle.velocity = velocity.reshape(3)
             self.swarm.append(particle)
 
-        print(f"初始化完成，共{len(self.swarm)}个粒子")
+        logger.info(f"初始化完成，共{len(self.swarm)}个粒子")
 
     def send_pid_to_device(self, kp: float, ki: float, kd: float) -> bool:
         """发送PID参数到设备
         设备协议：发送"KP:value,KI:value,KD:value\n"
         """
         command = f"KP:{kp:.4f},KI:{ki:.4f},KD:{kd:.4f}\n"
+        logger.debug(f"发送PID参数到设备: {command.strip()}")
         return self.comm_interface.write(command)
+
+    def receive_pid_runtime_data(self) -> None: ...
 
     def receive_performance_from_device(self) -> tuple[float, float, float, float]:
         """从设备接收反馈参数
-        返回格式："ITAE:value,OVERSHOOT:value,SETTLING:value,SSE:value\n"
+        返回格式：f + "\n"
         """
         start_time = time.time()
 
@@ -169,6 +202,7 @@ class FastPSO_PID_Optimizer:
             if line:
                 try:
                     result = parse(self.format, line)
+                    logger.debug(f"从设备接收到的原始数据: {line.strip()}")
 
                     # 提取需要的指标
                     itae = result.named["ITAE"]
@@ -176,39 +210,57 @@ class FastPSO_PID_Optimizer:
                     settling = result.named["SETTLING"]
                     sse = result.named["SSE"]
 
+                    logger.info(
+                        f"性能指标 - ITAE: {itae:.4f}, 超调: {overshoot:.2f}%, 稳定时间: {settling:.3f}s, 稳态误差: {sse:.4f}"
+                    )
                     return itae, overshoot, settling, sse
-                except:
+                except Exception as e:
+                    logger.warning(f"解析设备反馈数据失败: {e}, 原始数据: {line}")
                     continue
 
             time.sleep(0.01)
 
         # 超时返回默认值
+        logger.error("等待反馈参数超时")
         raise RuntimeError("等待反馈参数超时")
 
     def evaluate_particle(self, particle: Particle) -> bool:
         """评估单个粒子"""
         kp, ki, kd = particle.position
 
-        print(f"评估: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
+        logger.info(f"评估: Kp={kp:.4f}, Ki={ki:.4f}, Kd={kd:.4f}")
 
         # 发送参数到设备
         if not self.send_pid_to_device(kp, ki, kd):
-            logging.error("发送参数失败")
+            logger.error("发送参数失败")
             return False
 
         if not self.comm_interface.write(self.start_cmd):
-            logging.error("发送启动指令失败")
+            logger.error("发送启动指令失败")
             return False
 
         # 等待设备响应
-        time.sleep(self.config.evaluation_delay)
+        start_time: float = 0.0
+        if not self.caculate_from_mcu:
+            time.sleep(self.config.evaluation_delay)
+        else:
+            start_time = time.time()
+            while time.time() - start_time < self.config.evaluation_delay:
+                self.receive_pid_runtime_data()
 
+        stop_time = time.time()
         if not self.comm_interface.write(self.stop_cmd):
-            logging.error("发送停止指令失败")
+            logger.error("发送停止指令失败")
             return False
 
         # 接收性能指标
-        itae, overshoot, settling_time, sse = self.receive_performance_from_device()
+        if not self.caculate_from_mcu:
+            itae, overshoot, settling_time, sse = self.receive_performance_from_device()
+        else:
+            evaluation_time = start_time - stop_time
+            itae, overshoot, settling_time, sse = self.caculate_mcu_data(
+                evaluation_time
+            )
 
         # 计算适应度（加权和，越小越好）
         fitness = (
@@ -230,10 +282,14 @@ class FastPSO_PID_Optimizer:
             particle.best_fitness = fitness
             particle.best_position = particle.position.copy()
             self.success_count += 1
+            logger.debug(f"粒子个体最优更新: 适应度 {fitness:.4f}")
 
         self.evaluation_count += 1
         self.total_updates += 1
 
+        logger.debug(
+            f"评估完成，适应度: {fitness:.4f}, 总评估次数: {self.evaluation_count}"
+        )
         return True
 
     def update_inertia_weight(self, iteration: int) -> None:
@@ -243,6 +299,9 @@ class FastPSO_PID_Optimizer:
         self.config.inertia_weight = (
             self.config.inertia_max
             - (self.config.inertia_max - self.config.inertia_min) * progress
+        )
+        logger.debug(
+            f"迭代 {iteration}: 惯性权重更新为 {self.config.inertia_weight:.4f}"
         )
 
     def update_particle(self, particle: Particle, iteration: int) -> None:
@@ -283,12 +342,17 @@ class FastPSO_PID_Optimizer:
                 particle.position[i] = self.config.max_param[i]
                 particle.velocity[i] = -particle.velocity[i] * 0.5
 
+        logger.debug(f"粒子位置更新: {particle.position}, 速度: {particle.velocity}")
+
     def update_global_best(self) -> None:
         """更新全局最优解"""
         for particle in self.swarm:
             if particle.best_fitness < self.global_best_fitness:
                 self.global_best_fitness = particle.best_fitness
                 self.global_best_position = particle.best_position.copy()
+                logger.info(
+                    f"全局最优更新: 适应度 {self.global_best_fitness:.4f}, 位置: {self.global_best_position}"
+                )
 
     def check_convergence(self, tolerance: float = 1e-4) -> bool:
         """检查是否收敛"""
@@ -299,19 +363,20 @@ class FastPSO_PID_Optimizer:
         recent_history = self.best_fitness_history[-5:]
         improvement = abs(recent_history[0] - recent_history[-1])
 
+        logger.debug(f"收敛检查: 最近5次改进 {improvement:.6f}, 容忍度 {tolerance}")
         return improvement < tolerance
 
     def optimize(self, verbose: bool = True) -> tuple[np.ndarray, float]:
         """运行优化过程"""
         if not self.comm_interface.is_open():
-            logging.error("错误: 通信接口未打开")
+            logger.error("错误: 通信接口未打开")
             return self.global_best_position, self.global_best_fitness
 
-        logging.info("开始PSO优化过程")
-        logging.info(
+        logger.info("开始PSO优化过程")
+        logger.info(
             f"种群大小: {self.config.swarm_size}, 最大迭代: {self.config.max_iterations}"
         )
-        logging.info(
+        logger.info(
             f"参数范围: Kp[{self.config.min_param[0]}, {self.config.max_param[0]}], "
             f"Ki[{self.config.min_param[1]}, {self.config.max_param[1]}], "
             f"Kd[{self.config.min_param[2]}, {self.config.max_param[2]}]"
@@ -321,10 +386,10 @@ class FastPSO_PID_Optimizer:
         self.initialize_swarm()
 
         # 初始评估
-        logging.info("\n初始评估...")
+        logger.info("\n初始评估...")
         for particle in self.swarm:
             while not self.evaluate_particle(particle):
-                logging.error("评估失败")
+                logger.error("评估失败")
                 retry = input("重试？(y/n)")
                 retry = retry.lower()
                 if retry == "y":
@@ -338,7 +403,7 @@ class FastPSO_PID_Optimizer:
         # 迭代优化
         for iteration in range(1, self.config.max_iterations + 1):
             if verbose:
-                logging.info(f"\n迭代 {iteration}/{self.config.max_iterations}")
+                logger.info(f"\n迭代 {iteration}/{self.config.max_iterations}")
 
             # 更新惯性权重
             self.update_inertia_weight(iteration)
@@ -348,7 +413,7 @@ class FastPSO_PID_Optimizer:
                 self.update_particle(particle, iteration)
 
             # 评估更新后的粒子
-            logging.info(f"评估第{iteration}代...")
+            logger.info(f"评估第{iteration}代...")
             for particle in self.swarm:
                 self.evaluate_particle(particle)
 
@@ -360,10 +425,10 @@ class FastPSO_PID_Optimizer:
             if verbose and (
                 iteration % 5 == 0 or iteration == self.config.max_iterations
             ):
-                logging.info(
+                logger.info(
                     f"进度: 迭代{iteration}, 最优适应度={self.global_best_fitness:.6f}"
                 )
-                logging.info(
+                logger.info(
                     f"最优参数: Kp={self.global_best_position[0]:.4f}, "
                     f"Ki={self.global_best_position[1]:.4f}, "
                     f"Kd={self.global_best_position[2]:.4f}"
@@ -371,7 +436,7 @@ class FastPSO_PID_Optimizer:
 
             # 检查收敛
             if self.check_convergence():
-                logging.info(f"算法在第{iteration}代收敛")
+                logger.info(f"算法在第{iteration}代收敛")
                 break
 
         # 输出结果
@@ -381,15 +446,15 @@ class FastPSO_PID_Optimizer:
 
     def print_results(self) -> None:
         """打印优化结果"""
-        logging.info("\n" + "=" * 50)
-        logging.info("PSO优化完成!")
-        logging.info("=" * 50)
-        logging.info(f"总评估次数: {self.evaluation_count}")
-        logging.info(f"最优参数:")
-        logging.info(f"  Kp = {self.global_best_position[0]:.6f}")
-        logging.info(f"  Ki = {self.global_best_position[1]:.6f}")
-        logging.info(f"  Kd = {self.global_best_position[2]:.6f}")
-        logging.info(f"最优适应度: {self.global_best_fitness:.6f}")
+        logger.info("\n" + "=" * 50)
+        logger.info("PSO优化完成!")
+        logger.info("=" * 50)
+        logger.info(f"总评估次数: {self.evaluation_count}")
+        logger.info(f"最优参数:")
+        logger.info(f"  Kp = {self.global_best_position[0]:.6f}")
+        logger.info(f"  Ki = {self.global_best_position[1]:.6f}")
+        logger.info(f"  Kd = {self.global_best_position[2]:.6f}")
+        logger.info(f"最优适应度: {self.global_best_fitness:.6f}")
 
     def save_results(self, filename: str = "pso_pid_results.json") -> None:
         """保存优化结果到文件"""
@@ -422,9 +487,9 @@ class FastPSO_PID_Optimizer:
         try:
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
-            logging.info(f"结果已保存到: {filename}")
+            logger.info(f"结果已保存到: {filename}")
         except Exception as e:
-            logging.error(f"保存结果失败: {e}")
+            logger.error(f"保存结果失败: {e}")
 
 
 def main() -> None:
