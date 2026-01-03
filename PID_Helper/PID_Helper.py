@@ -106,10 +106,11 @@ class FastPSO_PID_Optimizer:
         config: FastPSO_PID_Conf,
         comm_interface: CommunicationInterface,
         caculate_from_mcu: bool = False,
-        f: str = "ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}",
+        f: str = "ITAE:{itae:f},OVERSHOOT:{overshoot:f},SETTLING:{setting:f},SSE:{sse:f}",
         start: str = "start",
         stop: str = "stop",
         delta_t: float = 0.0,
+        manual_input_data: bool = False,
     ) -> None:
         """
         FastPSO_PID_Optimizer初始化
@@ -128,6 +129,8 @@ class FastPSO_PID_Optimizer:
         :type stop: str
         :param delta_t: pid调控周期（秒），仅在caculate_from_mcu为否时起作用
         :type delta_t: float
+        :param manual_input_data: 手动输入数据
+        :type manual_input_data: bool
         """
         self.config = config
         self.comm_interface = comm_interface
@@ -160,6 +163,7 @@ class FastPSO_PID_Optimizer:
         self.target_list: list = []
         self.output_list: list = []
         self.delta_t: float = delta_t
+        self.manual_input_data: bool = manual_input_data
 
     def initialize_swarm(self) -> None:
         """初始化粒子群"""
@@ -189,7 +193,40 @@ class FastPSO_PID_Optimizer:
         logger.debug(f"发送PID参数到设备: {command.strip()}")
         return self.comm_interface.write(command)
 
-    def receive_pid_runtime_data(self) -> None: ...
+    def receive_pid_runtime_data(self) -> None:
+        """从设备接收PID运行过程数据（target和output）"""
+        if not self.comm_interface.is_open():
+            logger.error("通信接口未打开")
+            return
+
+        # 清空之前的数据
+        self.target_list.clear()
+        self.output_list.clear()
+
+        # 持续接收数据直到评估时间结束
+        start_time = time.time()
+        while time.time() - start_time < self.config.evaluation_delay:
+            line = self.comm_interface.read_line()
+            if line:
+                try:
+                    # 解析目标值和输出值
+                    result = parse(self.format, line)
+                    if result:
+                        target = result.named.get("TARGET")
+                        output = result.named.get("OUTPUT")
+                        if target is not None and output is not None:
+                            self.target_list.append(float(target))
+                            self.output_list.append(float(output))
+                            logger.debug(
+                                f"接收到数据: Target={target}, Output={output}"
+                            )
+                except Exception as e:
+                    logger.warning(f"解析运行数据失败: {e}, 原始数据: {line}")
+
+            # 小延迟避免CPU占用过高
+            time.sleep(0.001)
+
+        logger.info(f"接收到 {len(self.target_list)} 个数据点")
 
     def receive_performance_from_device(self) -> tuple[float, float, float, float]:
         """从设备接收反馈参数
@@ -197,32 +234,106 @@ class FastPSO_PID_Optimizer:
         """
         start_time = time.time()
 
-        while time.time() - start_time < self.config.max_evaluation_time:
-            line = self.comm_interface.read_line()
-            if line:
-                try:
-                    result = parse(self.format, line)
-                    logger.debug(f"从设备接收到的原始数据: {line.strip()}")
+        if self.manual_input_data:
+            while True:
+                line = self.comm_interface.read_line()
+                if line:
+                    try:
+                        result = parse(self.format, line)
+                        logger.debug(f"从设备接收到的原始数据: {line.strip()}")
 
-                    # 提取需要的指标
-                    itae = result.named["ITAE"]
-                    overshoot = result.named["OVERSHOOT"]
-                    settling = result.named["SETTLING"]
-                    sse = result.named["SSE"]
+                        # 提取需要的指标
+                        itae = result.named["itae"]
+                        overshoot = result.named["overshoot"]
+                        settling = result.named["setting"]
+                        sse = result.named["sse"]
 
-                    logger.info(
-                        f"性能指标 - ITAE: {itae:.4f}, 超调: {overshoot:.2f}%, 稳定时间: {settling:.3f}s, 稳态误差: {sse:.4f}"
-                    )
-                    return itae, overshoot, settling, sse
-                except Exception as e:
-                    logger.warning(f"解析设备反馈数据失败: {e}, 原始数据: {line}")
-                    continue
+                        logger.info(
+                            f"性能指标 - ITAE: {itae:.4f}, 超调: {overshoot:.2f}%, 稳定时间: {settling:.3f}s, 稳态误差: {sse:.4f}"
+                        )
+                        return itae, overshoot, settling, sse
+                    except Exception as e:
+                        logger.warning(f"解析设备反馈数据失败: {e}, 原始数据: {line}")
+                        continue
+        else:
+            while time.time() - start_time < self.config.max_evaluation_time:
+                line = self.comm_interface.read_line()
+                if line:
+                    try:
+                        result = parse(self.format, line)
+                        logger.debug(f"从设备接收到的原始数据: {line.strip()}")
 
-            time.sleep(0.01)
+                        # 提取需要的指标
+                        itae = result.named["itae"]
+                        overshoot = result.named["overshoot"]
+                        settling = result.named["setting"]
+                        sse = result.named["sse"]
 
-        # 超时返回默认值
-        logger.error("等待反馈参数超时")
-        raise RuntimeError("等待反馈参数超时")
+                        logger.info(
+                            f"性能指标 - ITAE: {itae:.4f}, 超调: {overshoot:.2f}%, 稳定时间: {settling:.3f}s, 稳态误差: {sse:.4f}"
+                        )
+                        return itae, overshoot, settling, sse
+                    except Exception as e:
+                        logger.warning(f"解析设备反馈数据失败: {e}, 原始数据: {line}")
+                        continue
+
+                time.sleep(0.01)
+
+            # 超时返回默认值
+            logger.error("等待反馈参数超时")
+            raise RuntimeError("等待反馈参数超时")
+
+    def caculate_mcu_data(
+        self, evaluation_time: float
+    ) -> tuple[float, float, float, float]:
+        """根据MCU数据计算性能指标"""
+        if len(self.target_list) < 2 or len(self.output_list) < 2:
+            logger.error("数据点不足，无法计算性能指标")
+            return 1e6, 100.0, evaluation_time, 1.0
+
+        # 确保目标值和输出值长度一致
+        min_len = min(len(self.target_list), len(self.output_list))
+        targets = np.array(self.target_list[:min_len])
+        outputs = np.array(self.output_list[:min_len])
+
+        # 稳态值（最后10%数据的平均值）
+        steady_idx = int(min_len * 0.9)
+        steady_target = np.mean(targets[steady_idx:])
+        steady_output = np.mean(outputs[steady_idx:])
+
+        # ITAE
+        time_points = np.arange(min_len) * self.delta_t
+        errors = targets - outputs
+        itae: float = float(np.sum(np.abs(errors) * time_points))
+
+        # 超调量
+        if steady_target != 0:
+            overshoot_percent = (
+                (np.max(outputs) - steady_target) / np.abs(steady_target)
+            ) * 100
+        else:
+            overshoot_percent = 0.0
+
+        # 稳定时间
+        error_band = 0.02 * np.abs(steady_target)
+        settled = np.abs(outputs - steady_target) <= error_band
+
+        # 第一次进入误差带后保持的时间
+        settling_time = evaluation_time  # 默认值为评估时间
+        for i in range(min_len - 1, 0, -1):
+            if not settled[i]:
+                settling_time = time_points[i]
+                break
+
+        # 稳态误差
+        sse = np.abs(steady_target - steady_output)
+
+        logger.info(
+            f"计算性能指标 - ITAE: {itae:.4f}, 超调: {overshoot_percent:.2f}%, "
+            f"稳定时间: {settling_time:.3f}s, 稳态误差: {sse:.4f}"
+        )
+
+        return itae, overshoot_percent, settling_time, sse
 
     def evaluate_particle(self, particle: Particle) -> bool:
         """评估单个粒子"""
@@ -240,15 +351,14 @@ class FastPSO_PID_Optimizer:
             return False
 
         # 等待设备响应
-        start_time: float = 0.0
         if not self.caculate_from_mcu:
             time.sleep(self.config.evaluation_delay)
         else:
             start_time = time.time()
-            while time.time() - start_time < self.config.evaluation_delay:
-                self.receive_pid_runtime_data()
+            self.receive_pid_runtime_data()
+            stop_time = time.time()
+            evaluation_time = stop_time - start_time
 
-        stop_time = time.time()
         if not self.comm_interface.write(self.stop_cmd):
             logger.error("发送停止指令失败")
             return False
@@ -257,7 +367,6 @@ class FastPSO_PID_Optimizer:
         if not self.caculate_from_mcu:
             itae, overshoot, settling_time, sse = self.receive_performance_from_device()
         else:
-            evaluation_time = start_time - stop_time
             itae, overshoot, settling_time, sse = self.caculate_mcu_data(
                 evaluation_time
             )
@@ -513,10 +622,10 @@ def main() -> None:
     # 配置PSO参数
     logging.info("\n\n配置PSO参数:")
     f = input(
-        r"输入数据解析格式（默认：ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}）："
+        r"输入数据解析格式（默认：ITAE:{itae:f},OVERSHOOT:{overshoot:f},SETTLING:{setting:f},SSE:{sse:f}）："
     )
     if f == "":
-        f = "ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}"
+        f = "ITAE:{itae:f},OVERSHOOT:{overshoot:f},SETTLING:{setting:f},SSE:{sse:f}"
     start_cmd = input("输入启动PID指令")
     stop_cmd = input("输入停止PID指令")
     use_default = input("使用默认配置? (y/n): ").strip().lower()
@@ -562,7 +671,9 @@ def main() -> None:
         )
 
     # 创建优化器
-    optimizer = FastPSO_PID_Optimizer(config, comm_interface, f, start_cmd, stop_cmd)
+    optimizer = FastPSO_PID_Optimizer(
+        config, comm_interface, True, f, start_cmd, stop_cmd
+    )
 
     # 运行优化
     try:

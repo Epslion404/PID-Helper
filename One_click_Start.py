@@ -40,15 +40,15 @@ class CI_Console(CI.CommunicationInterface):
     def close(self) -> bool:
         return True
 
-    def write(self, data: str, encode: str = "ansi") -> bool:
+    def write(self, data: str, encode: str = "ascii") -> bool:
         logger.info(data)
         return True
 
-    def read(self, size: int = 1, decode: str = "ansi") -> str | None:
-        return input("请在这里输入：")
+    def read(self, size: int = 1, decode: str = "ascii") -> str | None:
+        return input("请在这里输入(注意不要忘了在整数末尾加上.0)：")
 
-    def read_line(self, decode: str = "ansi") -> str | None:
-        return input("请在这里输入：")
+    def read_line(self, decode: str = "ascii") -> str | None:
+        return input("请在这里输入(注意不要忘了在整数末尾加上.0)：")
 
 
 def main() -> None:
@@ -63,9 +63,17 @@ def main() -> None:
     if not (mode in [str(i) for i in range(1, 4)]):
         logger.critical("无效选项，请重新输入")
         return None
+
+    comm_interface = None
+    caculate_from_mcu = False
+    manual_input_data = False
+    delta_t = 0.0
+
     if mode == "1":
         logger.info("手动输入模式，使用控制台通信")
         comm_interface = CI_Console("", -1)
+        caculate_from_mcu = False
+        manual_input_data = True
 
     else:
         logger.info("全自动模式，使用串口通信")
@@ -80,27 +88,38 @@ def main() -> None:
             logger.critical("未找到可用的串口。")
             return None
 
-        port = input("请输入串口号").strip()
-        baud_rate = int(input("请输入波特率").strip())
+        port = input("请输入串口号: ").strip()
+        baud_rate = int(input("请输入波特率: ").strip())
 
         comm_interface = CI.CommunicationInterface(port, baud_rate)
         if not comm_interface.is_open():
             logger.critical("无法打开串口，退出……")
             return None
 
-    if mode in ["2", "4"]:
-        ...
+        if mode == "2":
+            caculate_from_mcu = False
+        elif mode == "3":
+            caculate_from_mcu = True
+            delta_t = float(input("请输入PID调控周期(秒): ").strip())
 
     # 配置PSO参数
     logger.info("\n\n配置PSO参数:")
-    f = input(
-        r"输入数据解析格式（默认：ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}）："
-    )
-    if f == "":
-        f = "ITAE:{value:f},OVERSHOOT:{value:f},SETTLING:{value:f},SSE:{value:f}"
-    start_cmd = input("输入启动PID指令")
-    stop_cmd = input("输入停止PID指令")
-    use_default = input("使用默认配置? (y/n): ").strip().lower()
+    if caculate_from_mcu:
+        f = input(
+            r"输入数据解析格式（需要TARGET和OUTPUT，例如：TARGET:{target:f},OUTPUT:{output:f}）："
+        )
+        if f == "":
+            f = "TARGET:{target:f},OUTPUT:{output:f}"
+    else:
+        f = input(
+            r"输入数据解析格式（默认：ITAE:{itae:f},OVERSHOOT:{overshoot:f},SETTLING:{setting:f},SSE:{sse:f}）："
+        )
+        if f == "":
+            f = "ITAE:{itae:f},OVERSHOOT:{overshoot:f},SETTLING:{setting:f},SSE:{sse:f}"
+
+    start_cmd = input("输入启动PID指令: ")
+    stop_cmd = input("输入停止PID指令: ")
+    use_default = input("使用默认PSO配置? (y/n): ").strip().lower()
 
     if use_default == "y":
         config = PH.FastPSO_PID_Conf(
@@ -126,8 +145,8 @@ def main() -> None:
         logger.info("\n输入算法参数:")
         pop_size = int(input("种群大小: "))
         max_iter = int(input("最大迭代次数: "))
-        eva_delay = float(input("每次评估后的延迟"))
-        max_eva_delay = float(input("最大评估延迟"))
+        eva_delay = float(input("每次评估后的延迟: "))
+        max_eva_delay = float(input("最大评估延迟: "))
 
         config = PH.FastPSO_PID_Conf(
             kp_min=kp_min,
@@ -144,7 +163,14 @@ def main() -> None:
 
     # 创建优化器
     optimizer = PH.FastPSO_PID_Optimizer(
-        config, comm_interface, True, f, start_cmd, stop_cmd
+        config,
+        comm_interface,
+        caculate_from_mcu,
+        f,
+        start_cmd,
+        stop_cmd,
+        delta_t,
+        manual_input_data,
     )
 
     # 运行优化
@@ -171,7 +197,7 @@ def main() -> None:
         logger.critical(f"\n优化过程中发生错误: {e}")
     finally:
         # 清理
-        if comm_interface.is_open():
+        if comm_interface and comm_interface.is_open():
             comm_interface.close()
 
     return None

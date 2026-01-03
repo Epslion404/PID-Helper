@@ -25,25 +25,33 @@ class CommunicationInterface:
     def __init__(self, port: str = "", baud_rate: int = -1) -> None:
         self._port = port
         self._baud_rate = baud_rate
+        self.serial: serial.Serial = serial.Serial()
+
         if port != "" and baud_rate > 0:
-            self.serial: serial.Serial = serial.Serial(port=port, baudrate=baud_rate)
-            if self.serial.is_open:
-                logger.critical("串口打开失败")
+            try:
+                self.serial = serial.Serial(port=port, baudrate=baud_rate, timeout=1)
+                if self.serial.is_open:
+                    logger.info(f"串口打开成功: {port}, 波特率: {baud_rate}")
+                else:
+                    logger.critical("串口打开失败")
+            except Exception as e:
+                logger.critical(f"串口初始化失败: {e}")
                 self.serial: serial.Serial = serial.Serial()
-            else:
-                logger.info("串口打开成功")
         else:
-            self.serial: serial.Serial = serial.Serial()
             logger.warning("无串口配置数据")
 
     def open(self, port: str, baud_rate: int) -> bool:
-        self.serial = serial.Serial(port=port, baudrate=baud_rate)
-        if self.serial.is_open:
-            logger.critical("串口打开失败")
-            self.serial: serial.Serial = serial.Serial()
-        else:
-            logger.info("串口打开成功")
-        return self.serial.is_open
+        try:
+            self.serial = serial.Serial(port=port, baudrate=baud_rate, timeout=1)
+            if self.serial.is_open:
+                logger.info(f"串口打开成功: {port}, 波特率: {baud_rate}")
+                return True
+            else:
+                logger.critical("串口打开失败")
+                return False
+        except Exception as e:
+            logger.critical(f"串口打开失败: {e}")
+            return False
 
     def close(self) -> bool:
         if not self.serial.is_open:
@@ -51,7 +59,7 @@ class CommunicationInterface:
             return False
         else:
             self.serial.close()
-            if self.serial.open:
+            if self.serial.is_open:
                 logger.error("串口关闭失败")
                 return False
             else:
@@ -59,25 +67,31 @@ class CommunicationInterface:
                 return True
 
     def is_open(self) -> bool:
-        return True
+        return self.serial.is_open
 
     def is_close(self) -> bool:
         return not self.serial.is_open
 
-    def write(self, data: str, encode: str = "ansi") -> bool:
-        if not self.serial.writable:
+    def write(self, data: str, encode: str = "ascii") -> bool:
+        if not self.serial.is_open:
+            logger.error("串口未打开")
+            return False
+        elif not self.serial.writable():
             logger.error("串口不可写")
             return False
         else:
             try:
                 self.serial.write(data.encode(encode))
+                return True
             except Exception as e:
                 logger.error(f"发送失败：{e}")
                 return False
-            return True
 
-    def read(self, size: int = 1, decode: str = "ansi") -> Optional[str]:
-        if not self.serial.readable:
+    def read(self, size: int = 1, decode: str = "ascii") -> Optional[str]:
+        if not self.serial.is_open:
+            logger.error("串口未打开")
+            return None
+        elif not self.serial.readable():
             logger.error("串口不可读")
             return None
         else:
@@ -88,8 +102,11 @@ class CommunicationInterface:
                 logger.error(f"接收失败：{e}")
                 return None
 
-    def read_line(self, decode: str = "ansi") -> Optional[str]:
-        if not self.serial.readable:
+    def read_line(self, decode: str = "ascii") -> Optional[str]:
+        if not self.serial.is_open:
+            logger.error("串口未打开")
+            return None
+        elif not self.serial.readable():
             logger.error("串口不可读")
             return None
         else:
