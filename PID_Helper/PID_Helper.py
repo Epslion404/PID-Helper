@@ -288,8 +288,8 @@ class FastPSO_PID_Optimizer:
     ) -> tuple[float, float, float, float]:
         """根据MCU数据计算性能指标"""
         if len(self.target_list) < 2 or len(self.output_list) < 2:
-            logger.error("数据点不足，无法计算性能指标")
-            return 1e6, 100.0, evaluation_time, 1.0
+            logger.critical("数据点不足，无法计算性能指标")
+            raise RuntimeError("数据点不足，无法计算性能指标")
 
         # 确保目标值和输出值长度一致
         min_len = min(len(self.target_list), len(self.output_list))

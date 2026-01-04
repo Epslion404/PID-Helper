@@ -60,7 +60,7 @@ def main() -> None:
     logger.info("请输入运行模式：")
     mode: str = input()
 
-    if not (mode in [str(i) for i in range(1, 4)]):
+    if (not (mode in [str(i) for i in range(1, 4)])) or mode == "":
         logger.critical("无效选项，请重新输入")
         return None
 

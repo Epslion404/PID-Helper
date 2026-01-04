@@ -42,6 +42,9 @@ class CommunicationInterface:
 
     def open(self, port: str, baud_rate: int) -> bool:
         try:
+            if self.serial.is_open:
+                self.serial.close()
+
             self.serial = serial.Serial(port=port, baudrate=baud_rate, timeout=1)
             if self.serial.is_open:
                 logger.info(f"串口打开成功: {port}, 波特率: {baud_rate}")
